@@ -1,0 +1,47 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@theme {
+  --color-bg: #faf7f2;
+  --color-bg-2: #f1ebe0;
+  --color-card: #ffffff;
+  --color-ink: #1c1a17;
+  --color-ink-soft: #4a4742;
+  --color-ink-mute: #8a857d;
+  --color-accent: #c8553d;
+  --color-accent-soft: #e8a598;
+  --color-border: rgba(28, 26, 23, 0.08);
+
+  --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono), ui-monospace, SFMono-Regular, monospace;
+
+  --radius: 1.25rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-bg: #14110d;
+    --color-bg-2: #1f1a14;
+    --color-card: #1c1814;
+    --color-ink: #f4eee3;
+    --color-ink-soft: #b5ad9f;
+    --color-ink-mute: #807a70;
+    --color-accent: #e89178;
+    --color-accent-soft: #5a2f24;
+    --color-border: rgba(244, 238, 227, 0.08);
+  }
+}
+
+body {
+  background:
+    radial-gradient(1200px 600px at 90% -10%, var(--color-accent-soft) 0%, transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, var(--color-bg-2) 0%, transparent 60%),
+    var(--color-bg);
+  background-attachment: fixed;
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background: var(--color-accent);
+  color: #fff;
+}
