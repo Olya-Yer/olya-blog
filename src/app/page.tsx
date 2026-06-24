@@ -25,19 +25,9 @@ export default async function Home() {
           <p className="max-w-xl text-base leading-relaxed text-ink-soft sm:text-lg">
             I&apos;m <strong className="text-ink">{site.author}</strong>, a senior
             mobile engineer with 6+ years building iOS and cross-platform apps
-            in Swift, SwiftUI, and Flutter. Currently shipping field-service
-            tools at{" "}
-            <a
-              href="https://symphony.is"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-accent underline decoration-accent/40 underline-offset-4 hover:decoration-accent"
-            >
-              Symphony.is
-            </a>
-            . This is where I share notes from the trenches — mobile
-            architecture, state management, and the small details that make
-            apps feel alive.
+            in Swift, SwiftUI, and Flutter. This is where I share notes from
+            the trenches — mobile architecture, state management, and the
+            small details that make apps feel alive.
           </p>
 
           <SocialLinks />
