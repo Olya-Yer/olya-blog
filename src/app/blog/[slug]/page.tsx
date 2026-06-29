@@ -62,7 +62,7 @@ export default async function PostPage({
           <p className="text-lg text-ink-soft">{post.description}</p>
         </header>
 
-        <article className="prose prose-zinc dark:prose-invert prose-headings:font-semibold prose-a:text-accent prose-a:no-underline hover:prose-a:underline prose-code:font-mono prose-code:before:content-none prose-code:after:content-none max-w-none">
+        <article className="prose max-w-none">
           <MDXRemote
             source={post.body}
             options={{ mdxOptions: { remarkPlugins: [remarkGfm] } }}

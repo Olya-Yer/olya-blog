@@ -6,30 +6,24 @@
   --color-bg-2: #f1ebe0;
   --color-card: #ffffff;
   --color-ink: #1c1a17;
-  --color-ink-soft: #4a4742;
-  --color-ink-mute: #8a857d;
+  --color-ink-soft: #2c2924;
+  --color-ink-mute: #6e6a62;
   --color-accent: #c8553d;
   --color-accent-soft: #e8a598;
-  --color-border: rgba(28, 26, 23, 0.08);
+  --color-border: rgba(28, 26, 23, 0.1);
+  --color-code-bg: #1c1814;
+  --color-code-ink: #f4eee3;
 
-  --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-mono), ui-monospace, SFMono-Regular, monospace;
+  --font-sans: var(--font-sans-stack);
+  --font-mono: var(--font-mono-stack);
 
   --radius: 1.25rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  @theme {
-    --color-bg: #14110d;
-    --color-bg-2: #1f1a14;
-    --color-card: #1c1814;
-    --color-ink: #f4eee3;
-    --color-ink-soft: #b5ad9f;
-    --color-ink-mute: #807a70;
-    --color-accent: #e89178;
-    --color-accent-soft: #5a2f24;
-    --color-border: rgba(244, 238, 227, 0.08);
-  }
+:root {
+  color-scheme: light;
+  --font-sans-stack: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono-stack: var(--font-mono), ui-monospace, SFMono-Regular, monospace;
 }
 
 body {
@@ -39,6 +33,68 @@ body {
     var(--color-bg);
   background-attachment: fixed;
   font-family: var(--font-sans);
+  color: var(--color-ink);
+}
+
+/* Prose overrides — drive everything from our theme tokens with high specificity
+   so they win against @tailwindcss/typography's default scheme. */
+.prose {
+  color: var(--color-ink-soft);
+}
+.prose :where(p, li, blockquote, td, th) {
+  color: var(--color-ink-soft);
+}
+.prose :where(h1, h2, h3, h4, h5, h6) {
+  color: var(--color-ink);
+}
+.prose :where(strong) {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+.prose :where(em) {
+  color: var(--color-ink);
+}
+.prose :where(a) {
+  color: var(--color-accent);
+  text-decoration-color: color-mix(in oklab, var(--color-accent) 40%, transparent);
+  text-underline-offset: 3px;
+}
+.prose :where(a:hover) {
+  text-decoration-color: var(--color-accent);
+}
+.prose :where(blockquote) {
+  color: var(--color-ink);
+  border-left-color: var(--color-accent);
+}
+.prose :where(hr) {
+  border-color: var(--color-border);
+}
+.prose :where(ul > li::marker, ol > li::marker) {
+  color: var(--color-ink-mute);
+}
+.prose :where(:not(pre) > code) {
+  color: var(--color-accent);
+  background: color-mix(in oklab, var(--color-accent) 14%, transparent);
+  padding: 0.15em 0.4em;
+  border-radius: 0.35em;
+  font-weight: 500;
+  font-size: 0.92em;
+}
+.prose :where(:not(pre) > code)::before,
+.prose :where(:not(pre) > code)::after {
+  content: none;
+}
+.prose :where(pre) {
+  background: var(--color-code-bg);
+  color: var(--color-code-ink);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+}
+.prose :where(pre code) {
+  color: inherit;
+  background: transparent;
+  font-size: 0.9em;
+  padding: 0;
 }
 
 ::selection {
