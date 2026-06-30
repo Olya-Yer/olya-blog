@@ -22,11 +22,29 @@ at a time. Watch it first if you want the gentle introduction — it's 25
 minutes well spent.
 
 This post is about the next layer up: making multiple headers stack, letting
-some hide on scroll while others stay pinned, and handing all of it through
-the view tree without the caller having to pass arrays of `CGRect`s around.
+some hide on scroll while others stay pinned, getting the push-off math right
+when there's *already* a stack of pinned headers above, and handing all of it
+through the view tree without the caller having to pass arrays of `CGRect`s
+around.
 
-SwiftUI ships with `LazyVStack(pinnedViews: [.sectionHeaders])`, and on day one it
-feels like the answer to sticky headers. By day three you've usually outgrown it:
+<figure>
+  <img
+    src="/sticky-headers-demo.gif"
+    alt="Calendar demo: a filter bar that hides on scroll up, fixed month headers stacking at the top, and weekly section headers pushing each other off."
+    style={{ maxWidth: "360px", width: "100%", borderRadius: "12px", border: "1px solid var(--color-border)" }}
+  />
+  <figcaption style={{ fontSize: "0.85em", color: "var(--color-ink-mute)", marginTop: "0.5rem" }}>
+    All three modes together: filter bar (reverse), month headers (fixed, stacking), weeks (regular, pushing each other off).
+  </figcaption>
+</figure>
+
+The full source for the modifier and the calendar demo lives on GitHub:
+[**Olya-Yer/sticky-headers-swiftui**](https://github.com/Olya-Yer/sticky-headers-swiftui).
+
+## Why not LazyVStack?
+
+SwiftUI ships with `LazyVStack(pinnedViews: [.sectionHeaders])`, and on day one
+it feels like the answer. By day three you've usually outgrown it:
 
 - You can pin **one** layer of headers, not a hierarchy.
 - You can't make a header **hide on scroll** and slide back in.
@@ -34,18 +52,17 @@ feels like the answer to sticky headers. By day three you've usually outgrown it
 - Section headers want to know about each other, and `LazyVStack` doesn't tell
   them anything.
 
-I needed all four. So I wrote my own.
+I needed all four. So I wrote my own — about 250 lines of view modifier — that
+supports four modes per header:
 
-This post walks through the design — a small SwiftUI modifier system built on
-`PreferenceKey`, `Environment`, and `GeometryReader`. The whole thing is under
-260 lines and supports:
-
-- **Regular sticky headers** that stick when they hit the top, then get pushed
-  off when the next sticky arrives.
-- **Fixed headers** that stack on top of each other and never leave.
-- **Reverse headers** — the "hides on scroll up, reveals on scroll down" pattern
-  you see on iOS filter bars.
-- **Opt-out headers** that look sticky-eligible but never actually stick.
+- **Regular sticky** — sticks at the top, then gets pushed off when the next
+  sticky arrives, with the next header's top glued to its bottom until it
+  slides out.
+- **Fixed** (`isFixed: true`) — stays pinned forever. Multiple fixed headers
+  stack in the order they reach the top.
+- **Reverse** (`isRevers: true`) — hides on scroll up, reveals on scroll down.
+- **Opt-out** (`isSeeMore: true`) — looks sticky-eligible but never actually
+  sticks.
 
 ## The API first
 
@@ -53,7 +70,7 @@ The caller writes two things. At the `ScrollView` root:
 
 ```swift
 ScrollView(.vertical, showsIndicators: false) {
-    VStack(spacing: 32) {
+    VStack(spacing: 0) {
         // content
     }
 }
@@ -63,13 +80,15 @@ ScrollView(.vertical, showsIndicators: false) {
 And on each header that should stick:
 
 ```swift
-categoryHeader
-    .background(.background)
+monthBar
+    .background(Color.white)
     .sticky(lastItemY: lastItemY, isFixed: true)
+    .zIndex(100)
 ```
 
-That's it. No coordinator, no view model, no `UIScrollViewDelegate`. Each header
-declares *how* it wants to stick, and the modifier figures out the rest.
+No coordinator, no view model, no `UIScrollViewDelegate`. The `zIndex` at the
+call site is how the caller controls which sticky renders on top when two
+overlap — more on that further down.
 
 ## How the pieces talk to each other
 
@@ -78,11 +97,11 @@ about every other header**. Header A can't compute its own offset without
 knowing whether Header B is currently pinned above it — and Header B is two
 levels up the view tree.
 
-In the Swift Talk episode, the array of frames is collected at the `ScrollView`
+In the Swift Talk episode the array of frames is collected at the `ScrollView`
 root and passed back into `.sticky([CGRect])` explicitly by the caller. That
-works for one or two headers in a demo. It gets ugly fast when the headers are
-generated inside a `ForEach` deep in some child view, or when the caller
-shouldn't need to know that frames exist at all.
+works for a demo. It gets ugly fast when the headers are generated inside a
+`ForEach` deep in some child view, or when the caller shouldn't need to know
+that frames exist at all.
 
 So I closed the loop with `Environment`. `PreferenceKey` moves frames up the
 tree exactly as before; `Environment` moves the merged dictionary back down.
@@ -93,7 +112,7 @@ the frame array.
 each header  ──preference──►  ScrollView root  ──environment──►  each header
        │                                                                │
        │                                                                ▼
-       │                                                    reads neighbors,
+       │                                                    reads neighbours,
        │                                                    computes own offset
        ▼
    broadcasts its
@@ -114,16 +133,16 @@ struct FramePreference: PreferenceKey {
 ```
 
 The `reduce` step is the quiet hero. As SwiftUI walks up the view tree, every
-header contributes its single-entry dictionary, and `merge` glues them all into
-one. By the time the dictionary reaches the root, it contains the live frame
-and config of every sticky header on screen.
+header contributes its single-entry dictionary, and `merge` glues them all
+into one. By the time the dictionary reaches the root, it contains the live
+frame and config of every sticky header on screen.
 
 The root then pushes the merged dictionary back down through `Environment`:
 
 ```swift
 struct UseStickyHeaders: ViewModifier {
     static let container = "stickyContainer"
-    @State var frames: StickyRects.Value = [:]
+    @State var frames: [Namespace.ID: StickyRect] = [:]
 
     func body(content: Content) -> some View {
         content
@@ -161,19 +180,73 @@ direction comes almost for free:
 ```
 
 If `newFrame.minY` is greater than the last frame's `minY`, the view moved
-*down* visually, which means the user scrolled *up*. That single boolean drives
-the entire hide/show animation for reverse headers.
+*down* visually, which means the user scrolled *up*. That single boolean
+drives the hide/show animation for reverse headers.
 
 No `UIScrollView.contentOffset`, no delegate, no `GeometryReader` chasing the
 scroll view itself. Each header just watches its own frame.
 
-## Stacking fixed headers without z-fighting
+## Pushing each other off
 
-This is the bit I'm most proud of, and the bit furthest from the Swift Talk
-starting point. The episode's `isSticking = frame.minY < 0` works because
-there's only ever one sticky layer — the top of the container. As soon as you
-have two pinned headers, the second one needs to stick to the *bottom of the
-first*, not to zero. So `isSticking` becomes:
+This is the bit I want to spend the most time on because it's where the Swift
+Talk formula starts to bend once you have more than one sticky layer.
+
+In the episode, regular stickies sit at `y = 0` and the push reads as:
+
+```swift
+if let other = stickyRects.first(where: {
+    $0.minY > frame.minY && $0.minY < frame.height
+}) {
+    o -= frame.height - other.minY
+}
+```
+
+The condition says *another header has scrolled to within my own height of the
+container top* — i.e., it's about to overlap me. The amount says *push me up
+by however much of my height the next header has already eaten into*. As the
+next header arrives at `minY = 0`, the push reaches `frame.height` and I'm
+fully gone.
+
+That formula carries an invisible assumption: **my sticky position is `y = 0`**.
+The whole calculation is measured against the container top. The moment you
+put a row of fixed pinned headers above me — a year header, a month header,
+a filter bar — my actual sticky position is no longer the container top.
+It's `fixedHeadersHeight` *below* the container top. And then the formula
+fires far too late.
+
+Concretely: if Feb and March are both pinned above the regular weeks,
+`fixedHeadersHeight = 90`. My weekly headers actually stick at `y = 87`.
+For the next week to push me out, its top needs to enter the band from
+`y = 87` to `y = 117` (top of my stick position to its bottom). The original
+condition `other.minY < frame.height` only fires below `y = 30` — by which
+point the next header is already sitting *on top of mine* with no push having
+happened.
+
+The fix is to read the formula in terms of *my* stick region, not the
+container's top:
+
+```swift
+let stickRegionBottom = fixedHeadersHeight + frame.height
+if let other = stickyRects.first(where: { (key, value) in
+    key != id
+    && value.rect.minY > frame.minY
+    && value.rect.minY < stickRegionBottom
+}) {
+    o -= stickRegionBottom - other.value.rect.minY
+}
+```
+
+Same shape, just measured against where I actually live on screen. When
+`fixedHeadersHeight = 0` this collapses to the original — single-layer scenes
+behave identically. With a fixed stack above, the next header's top stays
+glued to my bottom from the moment it enters my stick region until I'm
+fully pushed off.
+
+## Stacking fixed headers
+
+For the fixed mode, the question is who came first. Two pinned headers both
+need to live at the top, but the second one needs to stick to *the bottom of
+the first*, not to zero. So `isSticking` becomes:
 
 ```swift
 var isSticking: Bool {
@@ -181,13 +254,10 @@ var isSticking: Bool {
 }
 ```
 
-And `fixedHeadersHeight` has to figure itself out from the live dictionary of
-neighbouring frames. The order has to be stable as the user scrolls through
-them, even though SwiftUI gives you no native concept of "header order."
-
-The trick: a fixed header's order is implied by **which neighbors are
-currently sticking, not by the static view hierarchy**. So `fixedHeadersHeight`
-filters the dictionary to find the fixed headers that came earlier:
+And `fixedHeadersHeight` figures itself out from the live dictionary. The
+order is implied by which neighbours are currently sticking, not by the static
+view hierarchy — so a header can correctly slot under whatever's already
+pinned even when the view tree gives no ordering hints:
 
 ```swift
 let previousFixedHeaders = stickyRects?
@@ -210,20 +280,74 @@ let previousFixedHeaders = stickyRects?
     }
 ```
 
-Then it sums their heights and offsets itself by that much. The effect is a
-clean stack: as each fixed header arrives, it slots in under the one above
-without ever overlapping. No `zIndex` wrestling, no manual ordering by the
-caller.
+Sum the heights of those headers and that's the y-offset to slot in below
+them. The effect is a clean stack: each new fixed header arrives, the
+previous ones slide up and pin, the new one slots in underneath.
 
-(There is one `.zIndex(isSticking ? .infinity : 0)` on the body, but that's
-about lifting *all* sticking headers above the scrolling content, not about
-ordering them relative to each other.)
+### A subtle transitional phase
+
+There's a window — between "this fixed header has hit its sticky position"
+and "this fixed header's geometry `minY` has crossed zero" — where a fixed
+header is being held in place by its `offset` but its raw frame is still
+positive. In that window the simple `minY < 0` check would say "this header
+isn't sticking yet," and any regular sticky downstream computes its
+`fixedHeadersHeight` as if the fixed header doesn't exist. Visually, the
+regular sticky pops up *behind* the held fixed bar and disappears for a
+frame.
+
+The fix is to count a fixed header as "occupying the top" whenever it has a
+non-zero `currentOffset`, not only when its geometry says it has been
+scrolled past:
+
+```swift
+.compactMap { header -> CGFloat? in
+    if header.value.rect.minY < 0 || header.value.currentOffset != 0 {
+        return header.value.rect.height
+    } else {
+        return nil
+    }
+}
+```
+
+Both checks are needed: `minY < 0` covers the long-tail case once the
+geometry has caught up; `currentOffset != 0` covers the transitional moment
+when the offset is doing the visual work and the geometry hasn't yet.
+
+## Z-index: the caller's job
+
+There's one `.zIndex(isSticking ? .infinity : 0)` inside the modifier, but it
+only lifts *every* sticking header above the scrolling content. It doesn't
+order them relative to each other — all of them get `.infinity`, and view-tree
+declaration order ends up deciding who covers whom. Which is wrong: a regular
+weekly header declared after the fixed month header would render *over* it
+during its exit animation.
+
+So z-ordering is the caller's responsibility, applied after `.sticky(...)`:
+
+```swift
+filterBar
+    .sticky(lastItemY: lastItemY, isRevers: true)
+    .zIndex(150)
+
+monthBar
+    .sticky(lastItemY: lastItemY, isFixed: true)
+    .zIndex(100)
+
+weekHeader
+    .sticky(lastItemY: lastItemY)
+    .zIndex(50)
+```
+
+Reverse on top, fixed below, regular below that. With the push-off fix, the
+regular sticky slides *under* the fixed bars on its way out, the way iOS
+Calendar does it. Without the explicit `.zIndex(...)`, it slides over them
+and the illusion breaks.
 
 ## The reverse-bar pattern
 
 The "filter bar that hides when you scroll up and slides back in when you
-scroll down" is everywhere on iOS — Mail's search bar, Safari's tab bar, every
-news app's nav. It's also the gnarliest mode in the modifier:
+scroll down" is everywhere on iOS — Mail's search bar, Safari's tab bar,
+every news app's nav. It's the gnarliest mode in the modifier:
 
 ```swift
 if isRevers, let reversView {
@@ -251,32 +375,45 @@ feel of native iOS bars instead of the binary jump you get with simpler
 implementations.
 
 And because *other* headers can read the reverse header's `currentOffset`
-through the environment dictionary, they push down or pull up in sync. When
-the reverse bar is fully hidden, the fixed headers below it occupy the space
-it left behind, seamlessly.
+through the environment dictionary, fixed headers automatically push down or
+pull up in sync. When the reverse bar is fully hidden, the fixed headers
+below it slide up into the space it left behind.
 
-## What I'd change
+## What I'd change next
 
-A few honest notes after living with this for a few months:
+A few honest notes after iterating on this:
 
-- **iOS 18's `onScrollGeometryChange`** would simplify the direction detection.
-  I wrote this before it landed; the `GeometryReader` per header still works
-  fine, but if I were starting today, I'd use the new API at the ScrollView
-  level and feed direction in through the environment instead.
-- The `adjustingConstant = 3.0` is a sub-pixel fudge for an off-by-a-few-pixels
-  artifact when fixed headers are present. It's the kind of magic number that
-  should have a comment explaining itself. *(Reader, take this as the comment.)*
-- The dictionary merge happens on every scroll frame. For a screen with two or
-  three sticky headers, the cost is invisible. If you tried this on a chat
-  view with dozens of section headers, you'd want a real benchmark first.
+- **iOS 18's `onScrollGeometryChange`** would simplify direction detection.
+  The `GeometryReader` per header still works fine, but if I were starting
+  today I'd use the new API at the ScrollView level and feed direction in
+  through the environment instead.
+- **The `adjustingConstant = 3.0` is a sub-pixel fudge** to hide a rendering
+  seam between stacked fixed headers. It's the kind of magic number that
+  should have a comment. *(Reader, take this as the comment.)*
+- **The dictionary's `.first(where:)` is non-deterministic** when more than
+  one header matches the push condition. In practice the natural ordering
+  of `minY` values keeps things stable, but a sort by `minY` (ascending, to
+  pick the closest matching "next") would make the behaviour
+  proof-against-future-headers.
+- **`useStickyHeaders()` updates state via `DispatchQueue.main.async`**, which
+  means dictionary changes lag one tick. With dense, fast-scrolling content
+  you can sometimes catch the transitional phase visually. The
+  `currentOffset != 0` fix mostly closes it, but the underlying single-tick
+  lag is still there.
 
 ## Why I keep coming back to this pattern
 
 What I like most about the `PreferenceKey + Environment` loop isn't the sticky
 headers themselves — it's that the whole system is **declarative**. Each
-header says "here's my frame, here's how I want to behave," and the resulting
+header says *here's my frame, here's how I want to behave*, and the resulting
 layout falls out of pure functions of that shared state. No callbacks, no
 ordering bugs, no stale references.
 
 It's the kind of small system that, every time I revisit it, I'm surprised
 how little code it actually takes to do something this expressive in SwiftUI.
+
+---
+
+**Code:** [Olya-Yer/sticky-headers-swiftui](https://github.com/Olya-Yer/sticky-headers-swiftui)
+on GitHub — the modifier file, the calendar demo, an Xcode project ready to
+clone and run.
